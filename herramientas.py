@@ -17,19 +17,97 @@ def describir_datos() -> dict:
     }
 
 
-def calcular(columna: str, operacion: str, agrupar_por: str | None = None) -> dict:
-    """Calcula suma, media, maximo, minimo o recuento de una columna, opcionalmente agrupando por otra."""
-    if columna not in df.columns:
-        return {"error": f"La columna '{columna}' no existe. Columnas: {list(df.columns)}"}
+def _error_columnas(*columnas):
+    for c in columnas:
+        if c is not None and c not in df.columns:
+            return f"La columna '{c}' no existe. Columnas: {list(df.columns)}"
+    return None
+
+
+def _filtrar(filtro_columna, filtro_valor):
+    """Devuelve (datos, error). Sin filtro, devuelve todos los datos."""
+    if not filtro_columna:
+        return df, None
+    error = _error_columnas(filtro_columna)
+    if error:
+        return None, error
+    if filtro_valor is None:
+        return None, "Si indicas filtro_columna, indica también filtro_valor"
+    datos = df[df[filtro_columna].astype(str).str.lower() == str(filtro_valor).lower()]
+    if datos.empty:
+        validos = sorted(df[filtro_columna].astype(str).unique())[:20]
+        return None, f"No hay filas con {filtro_columna} = {filtro_valor}. Valores posibles: {validos}"
+    return datos, None
+
+
+def calcular(columna: str, operacion: str, agrupar_por: str | None = None,
+             filtro_columna: str | None = None, filtro_valor: str | None = None) -> dict:
+    """Calcula suma, media, maximo, minimo o recuento de una columna. Opcional: agrupar por otra
+    columna y/o filtrar las filas donde filtro_columna sea igual a filtro_valor
+    (por ejemplo filtro_columna='ciudad', filtro_valor='Madrid')."""
     if operacion not in OPERACIONES:
         return {"error": f"Operación no válida. Usa una de: {list(OPERACIONES)}"}
-    if agrupar_por and agrupar_por not in df.columns:
-        return {"error": f"La columna '{agrupar_por}' no existe. Columnas: {list(df.columns)}"}
+    error = _error_columnas(columna, agrupar_por)
+    if error:
+        return {"error": error}
+    datos, error = _filtrar(filtro_columna, filtro_valor)
+    if error:
+        return {"error": error}
     try:
         if agrupar_por:
-            res = df.groupby(agrupar_por)[columna].agg(OPERACIONES[operacion])
+            res = datos.groupby(agrupar_por)[columna].agg(OPERACIONES[operacion])
             return {"resultado": {str(k): round(float(v), 2) for k, v in res.items()}}
-        return {"resultado": round(float(df[columna].agg(OPERACIONES[operacion])), 2)}
+        return {"resultado": round(float(datos[columna].agg(OPERACIONES[operacion])), 2)}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def calcular_por_mes(columna: str, operacion: str,
+                     filtro_columna: str | None = None, filtro_valor: str | None = None) -> dict:
+    """Calcula suma, media, maximo, minimo o recuento de una columna agrupado por mes (formato AAAA-MM).
+    Admite el mismo filtro opcional que calcular."""
+    if operacion not in OPERACIONES:
+        return {"error": f"Operación no válida. Usa una de: {list(OPERACIONES)}"}
+    error = _error_columnas(columna)
+    if error:
+        return {"error": error}
+    datos, error = _filtrar(filtro_columna, filtro_valor)
+    if error:
+        return {"error": error}
+    try:
+        res = datos.groupby(datos["fecha"].dt.to_period("M"))[columna].agg(OPERACIONES[operacion])
+        return {"resultado": {str(k): round(float(v), 2) for k, v in res.items()}}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def ranking(columna: str, operacion: str, agrupar_por: str, n: int = 3, orden: str = "mayor") -> dict:
+    """Devuelve los n grupos de agrupar_por con mayor (orden='mayor') o menor (orden='menor')
+    valor de la operación (suma, media, maximo, minimo o recuento) sobre la columna."""
+    if operacion not in OPERACIONES:
+        return {"error": f"Operación no válida. Usa una de: {list(OPERACIONES)}"}
+    if orden not in ("mayor", "menor"):
+        return {"error": "orden debe ser 'mayor' o 'menor'"}
+    error = _error_columnas(columna, agrupar_por)
+    if error:
+        return {"error": error}
+    try:
+        res = df.groupby(agrupar_por)[columna].agg(OPERACIONES[operacion])
+        res = res.sort_values(ascending=(orden == "menor")).head(int(n))
+        return {"resultado": {str(k): round(float(v), 2) for k, v in res.items()}}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def porcentaje_del_total(columna: str, agrupar_por: str) -> dict:
+    """Calcula qué porcentaje del total (suma) de una columna representa cada grupo de agrupar_por."""
+    error = _error_columnas(columna, agrupar_por)
+    if error:
+        return {"error": error}
+    try:
+        res = df.groupby(agrupar_por)[columna].sum()
+        pct = (res / res.sum() * 100).round(1)
+        return {"porcentajes": {str(k): float(v) for k, v in pct.items()}}
     except Exception as e:
         return {"error": str(e)}
 
