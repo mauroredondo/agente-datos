@@ -6,6 +6,7 @@ from google.genai import errors, types
 
 from herramientas import (df, describir_datos, calcular, calcular_por_mes, ranking,
                           porcentaje_del_total, resumen_estadistico, correlacion, grafico)
+
 load_dotenv()
 client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
 
@@ -24,7 +25,6 @@ INSTRUCCIONES = (
 
 ULTIMA_LLAMADA = 0.0
 INTERVALO_MIN = 4.5  # el plan gratuito permite 15 peticiones por minuto
-
 
 
 def crear_config(instrucciones: str) -> types.GenerateContentConfig:
@@ -54,17 +54,20 @@ def llamar_modelo(contents, config):
                 raise
 
 
-def preguntar(pregunta: str, instrucciones: str = INSTRUCCIONES) -> str:
-    contents = [types.Content(role="user", parts=[types.Part(text=pregunta)])]
+def preguntar(pregunta: str, instrucciones: str = INSTRUCCIONES, historial: list | None = None) -> str:
+    """Responde una pregunta. Si se pasa `historial` (lista), se va ampliando y el agente recuerda
+    los turnos anteriores; sin él, cada pregunta empieza de cero."""
+    contents = historial if historial is not None else []
+    contents.append(types.Content(role="user", parts=[types.Part(text=pregunta)]))
     config = crear_config(instrucciones)
     for paso in range(MAX_PASOS):
         resp = llamar_modelo(contents, config)
         llamadas = resp.function_calls
 
+        contents.append(resp.candidates[0].content)  # lo que dijo o pidió el modelo
         if not llamadas:  # el modelo ya tiene respuesta final
-            return resp.text
+            return resp.text or ""
 
-        contents.append(resp.candidates[0].content)  # lo que pidió el modelo
         resultados = []
         for llamada in llamadas:
             print(f"  -> herramienta: {llamada.name}({dict(llamada.args)})")
@@ -76,6 +79,7 @@ def preguntar(pregunta: str, instrucciones: str = INSTRUCCIONES) -> str:
                     resultado = funcion(**llamada.args)
                 except Exception as e:
                     resultado = {"error": f"Argumentos no válidos para {llamada.name}: {e}"}
+            resultados.append(types.Part.from_function_response(name=llamada.name, response=resultado))
         contents.append(types.Content(role="user", parts=resultados))
 
     return "No he conseguido responder en el número máximo de pasos."
@@ -83,6 +87,7 @@ def preguntar(pregunta: str, instrucciones: str = INSTRUCCIONES) -> str:
 
 if __name__ == "__main__":
     print("Agente de datos (escribe 'salir' para terminar)")
+    historial = []  # memoria de la conversación
     try:
         while True:
             pregunta = input("\nPregunta: ").strip()
@@ -90,7 +95,12 @@ if __name__ == "__main__":
                 continue
             if pregunta.lower() in ("salir", "exit", "quit"):
                 break
-            print(preguntar(pregunta))
+            n = len(historial)
+            try:
+                print(preguntar(pregunta, historial=historial))
+            except errors.APIError as e:
+                del historial[n:]  # descarta el turno incompleto
+                print(f"Error de la API ({e.code}): inténtalo de nuevo.")
     except (KeyboardInterrupt, EOFError):
         pass
     print("\nHasta luego.")

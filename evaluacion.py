@@ -1,10 +1,12 @@
 import re
-import time
 import sys
+from pathlib import Path
+
 import pandas as pd
 from agente import preguntar, INSTRUCCIONES
 
-df = pd.read_csv("ventas.csv", parse_dates=["fecha"])
+RAIZ = Path(__file__).parent
+df = pd.read_csv(RAIZ / "ventas.csv", parse_dates=["fecha"])
 
 
 def num(x):
@@ -42,6 +44,8 @@ PREGUNTAS += [
     ("¿Cuántas ventas hay en Valencia?", [num((df.ciudad == "Valencia").sum())]),
     ("¿En qué mes se vendieron más unidades de Zapatillas?", [[str(mes_zap), MESES[mes_zap.month - 1]]]),
 ]
+
+
 def dec(x, k=1):
     s = f"{round(x, k):.{k}f}"
     return [s, s.replace(".", ",")]  # acepta 112.5 y 112,5
@@ -73,7 +77,18 @@ def normalizar(texto: str) -> str:
     return re.sub(r"(?<=\d)[.,](?=\d{3}\b)", "", texto)  # quita separadores de miles
 
 
-def evaluar(instrucciones: str, etiqueta: str) -> list[dict]:
+def contiene(norm: str, esperado) -> bool:
+    """Busca el valor como palabra/número completo: '300' no coincide dentro de '3000'."""
+    patron = rf"(?<![\w.,]){re.escape(str(esperado).lower())}(?![\w]|[.,]\d)"
+    return re.search(patron, norm) is not None
+
+
+def menciona_moneda(texto: str) -> bool:
+    return "€" in texto or re.search(r"\beuros?\b", texto.lower()) is not None
+
+
+def evaluar(instrucciones: str, etiqueta: str, previas: list[dict] | None = None) -> list[dict]:
+    previas = previas or []
     filas = []
     for pregunta, esperados in PREGUNTAS:
         try:
@@ -84,9 +99,10 @@ def evaluar(instrucciones: str, etiqueta: str) -> list[dict]:
             ok = None  # no evaluable
         else:
             norm = normalizar(respuesta)
-            ok = all(any(str(a).lower() in norm for a in alternativas(e)) for e in esperados)
+            ok = all(any(contiene(norm, a) for a in alternativas(e)) for e in esperados)
         filas.append({"version": etiqueta, "pregunta": pregunta, "esperado": esperados,
-                      "ok": ok, "respuesta": respuesta, "inventa_moneda": ("€" in respuesta) or ("euro" in respuesta.lower())})
+                      "ok": ok, "respuesta": respuesta, "inventa_moneda": menciona_moneda(respuesta)})
+        pd.DataFrame(previas + filas).to_csv(RAIZ / "resultados.csv", index=False)  # guarda el progreso
     validas = [f for f in filas if f["ok"] is not None]
     aciertos = sum(f["ok"] for f in validas)
     print(f"\n>>> {etiqueta}: {aciertos}/{len(validas)} válidas "
@@ -98,8 +114,6 @@ def evaluar(instrucciones: str, etiqueta: str) -> list[dict]:
 if __name__ == "__main__":
     resultados = evaluar(INSTRUCCIONES, "A (completas)")
     if "--completa" in sys.argv:  # python evaluacion.py --completa
-        resultados += evaluar(INSTRUCCIONES_B, "B (mínimas)")
-    pd.DataFrame(resultados).to_csv("resultados.csv", index=False)
+        resultados += evaluar(INSTRUCCIONES_B, "B (mínimas)", previas=resultados)
+    pd.DataFrame(resultados).to_csv(RAIZ / "resultados.csv", index=False)
     print("Guardado en resultados.csv")
-
-    

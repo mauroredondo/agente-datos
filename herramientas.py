@@ -1,9 +1,14 @@
+from pathlib import Path
+
 import pandas as pd
 import matplotlib
 matplotlib.use("Agg")  # dibuja en archivos, sin abrir ventanas
 import matplotlib.pyplot as plt
 
-df = pd.read_csv("ventas.csv", parse_dates=["fecha"])
+RAIZ = Path(__file__).parent
+CARPETA_GRAFICOS = RAIZ / "graficos"
+
+df = pd.read_csv(RAIZ / "ventas.csv", parse_dates=["fecha"])
 
 OPERACIONES = {"suma": "sum", "media": "mean", "mediana": "median", "maximo": "max",
                "minimo": "min", "recuento": "count", "desviacion": "std", "varianza": "var"}
@@ -43,7 +48,7 @@ def _filtrar(filtro_columna, filtro_valor):
 
 def calcular(columna: str, operacion: str, agrupar_por: str | None = None,
              filtro_columna: str | None = None, filtro_valor: str | None = None) -> dict:
-    """Calcula suma, media, maximo, minimo o recuento de una columna. Opcional: agrupar por otra
+    """Calcula suma, media, mediana, maximo, minimo, recuento, desviacion (típica) o varianza de una columna. Opcional: agrupar por otra
     columna y/o filtrar las filas donde filtro_columna sea igual a filtro_valor
     (por ejemplo filtro_columna='ciudad', filtro_valor='Madrid')."""
     if operacion not in OPERACIONES:
@@ -65,7 +70,7 @@ def calcular(columna: str, operacion: str, agrupar_por: str | None = None,
 
 def calcular_por_mes(columna: str, operacion: str,
                      filtro_columna: str | None = None, filtro_valor: str | None = None) -> dict:
-    """Calcula suma, media, maximo, minimo o recuento de una columna agrupado por mes (formato AAAA-MM).
+    """Calcula suma, media, mediana, maximo, minimo, recuento, desviacion (típica) o varianza de una columna agrupado por mes (formato AAAA-MM).
     Admite el mismo filtro opcional que calcular."""
     if operacion not in OPERACIONES:
         return {"error": f"Operación no válida. Usa una de: {list(OPERACIONES)}"}
@@ -85,7 +90,7 @@ def calcular_por_mes(columna: str, operacion: str,
 def ranking(columna: str, operacion: str, agrupar_por: str, n: int = 3, orden: str = "mayor",
             filtro_columna: str | None = None, filtro_valor: str | None = None) -> dict:
     """Devuelve los n grupos de agrupar_por con mayor (orden='mayor') o menor (orden='menor')
-    valor de la operación (suma, media, maximo, minimo o recuento) sobre la columna.
+    valor de la operación (suma, media, mediana, maximo, minimo, recuento, desviacion (típica) o varianza) sobre la columna.
     Admite el mismo filtro opcional que calcular."""
     if operacion not in OPERACIONES:
         return {"error": f"Operación no válida. Usa una de: {list(OPERACIONES)}"}
@@ -105,35 +110,49 @@ def ranking(columna: str, operacion: str, agrupar_por: str, n: int = 3, orden: s
         return {"error": str(e)}
 
 
-def porcentaje_del_total(columna: str, agrupar_por: str) -> dict:
-    """Calcula qué porcentaje del total (suma) de una columna representa cada grupo de agrupar_por."""
+def porcentaje_del_total(columna: str, agrupar_por: str,
+                         filtro_columna: str | None = None, filtro_valor: str | None = None) -> dict:
+    """Calcula qué porcentaje del total (suma) de una columna representa cada grupo de agrupar_por.
+    Admite el mismo filtro opcional que calcular."""
     error = _error_columnas(columna, agrupar_por)
     if error:
         return {"error": error}
+    datos, error = _filtrar(filtro_columna, filtro_valor)
+    if error:
+        return {"error": error}
     try:
-        res = df.groupby(agrupar_por)[columna].sum()
+        res = datos.groupby(agrupar_por)[columna].sum()
         pct = (res / res.sum() * 100).round(1)
         return {"porcentajes": {str(k): float(v) for k, v in pct.items()}}
     except Exception as e:
         return {"error": str(e)}
 
 
-def grafico(tipo: str, x: str, y: str, archivo: str = "grafico.png") -> dict:
-    """Dibuja un gráfico de 'barras' o 'lineas' con la suma de y agrupada por x y lo guarda como imagen."""
-    if x not in df.columns or y not in df.columns:
-        return {"error": f"Columnas válidas: {list(df.columns)}"}
+def grafico(tipo: str, x: str, y: str, archivo: str = "grafico.png",
+            filtro_columna: str | None = None, filtro_valor: str | None = None) -> dict:
+    """Dibuja un gráfico de 'barras' o 'lineas' con la suma de y agrupada por x y lo guarda como imagen
+    en la carpeta graficos. Admite el mismo filtro opcional que calcular."""
+    error = _error_columnas(x, y)
+    if error:
+        return {"error": error}
     if tipo not in ("barras", "lineas"):
         return {"error": "El tipo debe ser 'barras' o 'lineas'"}
+    datos, error = _filtrar(filtro_columna, filtro_valor)
+    if error:
+        return {"error": error}
     try:
-        datos = df.groupby(x)[y].sum()
+        nombre = Path(archivo).stem or "grafico"  # solo el nombre: nunca rutas ni sobrescribir fuera
+        CARPETA_GRAFICOS.mkdir(exist_ok=True)
+        ruta = CARPETA_GRAFICOS / f"{nombre}.png"
+        agrupado = datos.groupby(x)[y].sum()
         fig, ax = plt.subplots()
-        datos.plot(kind="bar" if tipo == "barras" else "line", ax=ax)
+        agrupado.plot(kind="bar" if tipo == "barras" else "line", ax=ax)
         ax.set_xlabel(x)
         ax.set_ylabel(y)
         fig.tight_layout()
-        fig.savefig(archivo)
+        fig.savefig(ruta)
         plt.close(fig)
-        return {"archivo": archivo}
+        return {"archivo": str(ruta.relative_to(RAIZ))}
     except Exception as e:
         return {"error": str(e)}
 
