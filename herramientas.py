@@ -81,9 +81,11 @@ def calcular_por_mes(columna: str, operacion: str,
         return {"error": str(e)}
 
 
-def ranking(columna: str, operacion: str, agrupar_por: str, n: int = 3, orden: str = "mayor") -> dict:
+def ranking(columna: str, operacion: str, agrupar_por: str, n: int = 3, orden: str = "mayor",
+            filtro_columna: str | None = None, filtro_valor: str | None = None) -> dict:
     """Devuelve los n grupos de agrupar_por con mayor (orden='mayor') o menor (orden='menor')
-    valor de la operación (suma, media, maximo, minimo o recuento) sobre la columna."""
+    valor de la operación (suma, media, maximo, minimo o recuento) sobre la columna.
+    Admite el mismo filtro opcional que calcular."""
     if operacion not in OPERACIONES:
         return {"error": f"Operación no válida. Usa una de: {list(OPERACIONES)}"}
     if orden not in ("mayor", "menor"):
@@ -91,8 +93,11 @@ def ranking(columna: str, operacion: str, agrupar_por: str, n: int = 3, orden: s
     error = _error_columnas(columna, agrupar_por)
     if error:
         return {"error": error}
+    datos, error = _filtrar(filtro_columna, filtro_valor)
+    if error:
+        return {"error": error}
     try:
-        res = df.groupby(agrupar_por)[columna].agg(OPERACIONES[operacion])
+        res = datos.groupby(agrupar_por)[columna].agg(OPERACIONES[operacion])
         res = res.sort_values(ascending=(orden == "menor")).head(int(n))
         return {"resultado": {str(k): round(float(v), 2) for k, v in res.items()}}
     except Exception as e:
