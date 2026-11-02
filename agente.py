@@ -4,7 +4,10 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import errors, types
 
-from herramientas import (df, describir_datos, calcular, calcular_por_mes, ranking,
+import sys
+
+import herramientas
+from herramientas import (cargar_csv, describir_datos, calcular, calcular_por_mes, ranking,
                           porcentaje_del_total, resumen_estadistico, correlacion, grafico)
 load_dotenv()
 client = genai.Client(api_key=os.environ["GEMINI_API_KEY"],
@@ -16,12 +19,17 @@ MAX_PASOS = 6  # límite para que el agente no se quede en bucle
 HERRAMIENTAS = {f.__name__: f for f in (describir_datos, calcular, calcular_por_mes, ranking,
                                         porcentaje_del_total, resumen_estadistico, correlacion, grafico)}
 
-INSTRUCCIONES = (
-    "Eres un analista de datos. Responde siempre en español. "
-    "Para cualquier cifra debes usar las herramientas: no inventes números ni monedas. "
-    f"El dataset tiene estas columnas: {', '.join(df.columns)}. "
-    "Solo dibuja un gráfico si el usuario lo pide explícitamente."
-)
+def crear_instrucciones() -> str:
+    """Instrucciones del sistema con las columnas del dataset cargado en ese momento."""
+    return (
+        "Eres un analista de datos. Responde siempre en español. "
+        "Para cualquier cifra debes usar las herramientas: no inventes números ni monedas. "
+        f"El dataset tiene estas columnas: {', '.join(herramientas.df.columns)}. "
+        "Solo dibuja un gráfico si el usuario lo pide explícitamente."
+    )
+
+
+INSTRUCCIONES = crear_instrucciones()
 
 ULTIMA_LLAMADA = 0.0
 INTERVALO_MIN = 4.5  # el plan gratuito permite 15 peticiones por minuto
@@ -87,6 +95,13 @@ def preguntar(pregunta: str, instrucciones: str = INSTRUCCIONES, historial: list
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1:  # python agente.py ruta/al/archivo.csv
+        try:
+            cargar_csv(sys.argv[1])
+        except Exception as e:
+            sys.exit(f"No se pudo cargar el CSV: {e}")
+        INSTRUCCIONES = crear_instrucciones()
+        print(f"Cargado {sys.argv[1]} ({len(herramientas.df)} filas)")
     print("Agente de datos (escribe 'salir' para terminar)")
     historial = []  # memoria de la conversación
     try:
@@ -98,7 +113,7 @@ if __name__ == "__main__":
                 break
             n = len(historial)
             try:
-                print(preguntar(pregunta, historial=historial))
+                print(preguntar(pregunta, instrucciones=INSTRUCCIONES, historial=historial))
             except errors.APIError as e:
                 del historial[n:]  # descarta el turno incompleto
                 print(f"Error de la API ({e.code}): inténtalo de nuevo.")

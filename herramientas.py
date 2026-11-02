@@ -8,10 +8,58 @@ import matplotlib.pyplot as plt
 RAIZ = Path(__file__).parent
 CARPETA_GRAFICOS = RAIZ / "graficos"
 
-df = pd.read_csv(RAIZ / "ventas.csv", parse_dates=["fecha"])
+CSV_POR_DEFECTO = RAIZ / "ventas.csv"
+df = None  # se rellena con cargar_csv()
 
 OPERACIONES = {"suma": "sum", "media": "mean", "mediana": "median", "maximo": "max",
                "minimo": "min", "recuento": "count", "desviacion": "std", "varianza": "var"}
+
+
+def _leer_csv(ruta):
+    """Lee un CSV adivinando el separador (, ; tab) y probando varias codificaciones."""
+    for codificacion in ("utf-8-sig", "latin-1"):
+        try:
+            return pd.read_csv(ruta, sep=None, engine="python", encoding=codificacion)
+        except UnicodeDecodeError:
+            continue
+
+
+def _convertir_tipos(datos):
+    """Convierte las columnas de texto a número (admite coma decimal) o a fecha cuando casi todos
+    sus valores lo permiten."""
+    for c in datos.columns:
+        if pd.api.types.is_numeric_dtype(datos[c]) or pd.api.types.is_datetime64_any_dtype(datos[c]):
+            continue
+        texto = datos[c].dropna().astype(str).str.strip()
+        if texto.empty:
+            continue
+        numeros = pd.to_numeric(datos[c].astype(str).str.strip().str.replace(",", ".", regex=False),
+                                errors="coerce")
+        if numeros.notna().sum() >= 0.9 * len(texto):
+            datos[c] = numeros
+            continue
+        fechas = pd.to_datetime(datos[c], errors="coerce", dayfirst=True, format="mixed")
+        if fechas.notna().sum() >= 0.9 * len(texto):
+            datos[c] = fechas
+    return datos
+
+
+def cargar_csv(ruta=CSV_POR_DEFECTO):
+    """Carga cualquier CSV como dataset activo de las herramientas. Devuelve el DataFrame."""
+    global df
+    ruta = Path(ruta).expanduser()
+    if not ruta.is_file():
+        raise FileNotFoundError(f"No existe el archivo: {ruta}")
+    datos = _leer_csv(ruta)
+    if datos is None or datos.empty or len(datos.columns) < 1:
+        raise ValueError(f"El archivo {ruta} está vacío o no es un CSV válido")
+    datos.columns = [str(c).strip() for c in datos.columns]
+    df = _convertir_tipos(datos)
+    return df
+
+
+def _columnas_fecha():
+    return [c for c in df.columns if pd.api.types.is_datetime64_any_dtype(df[c])]
 
 
 def describir_datos() -> dict:
@@ -68,20 +116,28 @@ def calcular(columna: str, operacion: str, agrupar_por: str | None = None,
         return {"error": str(e)}
 
 
-def calcular_por_mes(columna: str, operacion: str,
+def calcular_por_mes(columna: str, operacion: str, columna_fecha: str | None = None,
                      filtro_columna: str | None = None, filtro_valor: str | None = None) -> dict:
     """Calcula suma, media, mediana, maximo, minimo, recuento, desviacion (típica) o varianza de una columna agrupado por mes (formato AAAA-MM).
-    Admite el mismo filtro opcional que calcular."""
+    columna_fecha es la columna de fechas
+    (por defecto, la primera columna de fecha del dataset). Admite el mismo filtro opcional que calcular."""
     if operacion not in OPERACIONES:
         return {"error": f"Operación no válida. Usa una de: {list(OPERACIONES)}"}
-    error = _error_columnas(columna)
+    if columna_fecha is None:
+        fechas = _columnas_fecha()
+        if not fechas:
+            return {"error": "El dataset no tiene ninguna columna de fecha"}
+        columna_fecha = fechas[0]
+    error = _error_columnas(columna, columna_fecha)
     if error:
         return {"error": error}
+    if not pd.api.types.is_datetime64_any_dtype(df[columna_fecha]):
+        return {"error": f"La columna '{columna_fecha}' no es una fecha. Columnas de fecha: {_columnas_fecha()}"}
     datos, error = _filtrar(filtro_columna, filtro_valor)
     if error:
         return {"error": error}
     try:
-        res = datos.groupby(datos["fecha"].dt.to_period("M"))[columna].agg(OPERACIONES[operacion])
+        res = datos.groupby(datos[columna_fecha].dt.to_period("M"))[columna].agg(OPERACIONES[operacion])
         return {"resultado": {str(k): round(float(v), 2) for k, v in res.items()}}
     except Exception as e:
         return {"error": str(e)}
@@ -203,3 +259,6 @@ def correlacion(columna_a: str, columna_b: str, metodo: str = "pearson") -> dict
                 "metodo": metodo, "n": int(df[[columna_a, columna_b]].dropna().shape[0])}
     except Exception as e:
         return {"error": str(e)}
+
+
+cargar_csv()  # dataset por defecto; el agente puede cambiarlo con cargar_csv(ruta)
