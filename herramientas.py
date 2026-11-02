@@ -5,7 +5,8 @@ import matplotlib.pyplot as plt
 
 df = pd.read_csv("ventas.csv", parse_dates=["fecha"])
 
-OPERACIONES = {"suma": "sum", "media": "mean", "maximo": "max", "minimo": "min", "recuento": "count"}
+OPERACIONES = {"suma": "sum", "media": "mean", "mediana": "median", "maximo": "max",
+               "minimo": "min", "recuento": "count", "desviacion": "std", "varianza": "var"}
 
 
 def describir_datos() -> dict:
@@ -133,5 +134,53 @@ def grafico(tipo: str, x: str, y: str, archivo: str = "grafico.png") -> dict:
         fig.savefig(archivo)
         plt.close(fig)
         return {"archivo": archivo}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def _r(x):
+    """Redondea a 2 decimales y convierte los NaN en None."""
+    return None if pd.isna(x) else round(float(x), 2)
+
+
+def resumen_estadistico(columna: str, agrupar_por: str | None = None,
+                        filtro_columna: str | None = None, filtro_valor: str | None = None) -> dict:
+    """Devuelve estadísticos descriptivos de una columna numérica: recuento, media, desviación típica
+    (muestral), mínimo, Q1, mediana, Q3 y máximo. Opcional: por grupos (agrupar_por) y/o con filtro."""
+    error = _error_columnas(columna, agrupar_por)
+    if error:
+        return {"error": error}
+    datos, error = _filtrar(filtro_columna, filtro_valor)
+    if error:
+        return {"error": error}
+    if not pd.api.types.is_numeric_dtype(datos[columna]):
+        return {"error": f"La columna '{columna}' no es numérica"}
+
+    def resumen(serie):
+        d = serie.describe()
+        return {"recuento": int(d["count"]), "media": _r(d["mean"]), "desviacion": _r(d["std"]),
+                "minimo": _r(d["min"]), "q1": _r(d["25%"]), "mediana": _r(d["50%"]),
+                "q3": _r(d["75%"]), "maximo": _r(d["max"])}
+
+    try:
+        if agrupar_por:
+            return {"resultado": {str(k): resumen(g[columna]) for k, g in datos.groupby(agrupar_por)}}
+        return {"resultado": resumen(datos[columna])}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def correlacion(columna_a: str, columna_b: str, metodo: str = "pearson") -> dict:
+    """Calcula el coeficiente de correlación entre dos columnas numéricas (metodo: 'pearson' o 'spearman')."""
+    if metodo not in ("pearson", "spearman"):
+        return {"error": "metodo debe ser 'pearson' o 'spearman'"}
+    error = _error_columnas(columna_a, columna_b)
+    if error:
+        return {"error": error}
+    if not (pd.api.types.is_numeric_dtype(df[columna_a]) and pd.api.types.is_numeric_dtype(df[columna_b])):
+        return {"error": "Las dos columnas deben ser numéricas"}
+    try:
+        return {"correlacion": _r(df[columna_a].corr(df[columna_b], method=metodo)),
+                "metodo": metodo, "n": int(df[[columna_a, columna_b]].dropna().shape[0])}
     except Exception as e:
         return {"error": str(e)}

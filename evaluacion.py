@@ -42,6 +42,23 @@ PREGUNTAS += [
     ("¿Cuántas ventas hay en Valencia?", [num((df.ciudad == "Valencia").sum())]),
     ("¿En qué mes se vendieron más unidades de Zapatillas?", [[str(mes_zap), MESES[mes_zap.month - 1]]]),
 ]
+def dec(x, k=1):
+    s = f"{round(x, k):.{k}f}"
+    return [s, s.replace(".", ",")]  # acepta 112.5 y 112,5
+
+
+PREGUNTAS += [
+    ("¿Cuál es la mediana de los ingresos por venta? Redondea a un decimal.", [dec(df.ingresos.median())]),
+    ("¿Cuál es la desviación típica de las unidades por venta? Redondea a un decimal.", [dec(df.unidades.std())]),
+    ("¿Cuál es la media de ingresos por venta en Sevilla? Redondea a un decimal.",
+     [dec(df[df.ciudad == "Sevilla"].ingresos.mean())]),
+    ("¿Qué ciudad tiene la mediana de ingresos por venta más alta?",
+     [df.groupby("ciudad").ingresos.median().idxmax()]),
+    ("¿Cuál es la correlación de Pearson entre unidades e ingresos? Redondea a 2 decimales.",
+     [dec(df.unidades.corr(df.ingresos), 2)]),
+    ("¿Cuál es el tercer cuartil (Q3) de los ingresos por venta? Redondea a un decimal.",
+     [dec(df.ingresos.quantile(0.75))]),
+]
 
 
 def alternativas(x):

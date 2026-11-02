@@ -4,16 +4,16 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import errors, types
 
-from herramientas import df, describir_datos, calcular, calcular_por_mes, ranking, porcentaje_del_total, grafico
-
+from herramientas import (df, describir_datos, calcular, calcular_por_mes, ranking,
+                          porcentaje_del_total, resumen_estadistico, correlacion, grafico)
 load_dotenv()
 client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
 
-MODEL = "gemini-flash-lite-latest"
+MODEL = "gemini-flash-latest"
 MAX_PASOS = 6  # límite para que el agente no se quede en bucle
 
-HERRAMIENTAS = {f.__name__: f for f in (describir_datos, calcular, calcular_por_mes,
-                                        ranking, porcentaje_del_total, grafico)}
+HERRAMIENTAS = {f.__name__: f for f in (describir_datos, calcular, calcular_por_mes, ranking,
+                                        porcentaje_del_total, resumen_estadistico, correlacion, grafico)}
 
 INSTRUCCIONES = (
     "Eres un analista de datos. Responde siempre en español. "
