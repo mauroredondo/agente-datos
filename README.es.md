@@ -15,7 +15,21 @@ Ejemplos de preguntas (con el dataset de ventas incluido):
 - "¿Hay correlación entre unidades e ingresos?"
 - "Dibuja un gráfico de barras de ingresos por ciudad."
 
-Recuerda la conversación, así que se pueden hacer preguntas de seguimiento ("¿y en Madrid?"). Funciona con cualquier CSV, no solo con el de ejemplo: detecta el separador (`,` `;` tabulador), prueba UTF-8 y Latin-1, admite coma decimal y convierte las columnas de fecha.
+Recuerda la conversación, así que se pueden hacer preguntas de seguimiento ("¿y en Madrid?"). Funciona con cualquier CSV, no solo con el de ejemplo.
+
+## Usar tu propio CSV
+
+```bash
+python agente.py ruta/a/tus_datos.csv
+```
+
+Al cargar el archivo, el agente:
+
+- Detecta el separador (`,` `;` tabulador) y la codificación (UTF-8 y, si falla, Latin-1).
+- Convierte las columnas de texto a números (admite coma decimal, como `1,5`) o a fechas (formato día/mes/año) cuando casi todos sus valores lo permiten.
+- Informa al modelo de las columnas disponibles. La herramienta por mes usa la primera columna de fecha que encuentre.
+
+Sin argumentos, usa el dataset de ejemplo, `ventas.csv`.
 
 ## Cómo funciona
 
@@ -28,7 +42,7 @@ Es un bucle de agente escrito a mano con *function calling* (el modo automático
 - **8 herramientas:** `describir_datos`, `calcular`, `calcular_por_mes`, `ranking`, `porcentaje_del_total`, `resumen_estadistico`, `correlacion`, `grafico`.
 - Los docstrings de las funciones son las descripciones que lee el modelo.
 - Los errores de las herramientas se devuelven al modelo como datos, para que se corrija solo (columna que no existe, operación no válida, filtro sin filas).
-- Un límite de pasos (6) evita bucles. Las llamadas respetan el límite del plan gratuito (15 peticiones por minuto) y se reintentan ante 429, 500, 503 y 504.
+- Un límite de pasos (6) evita bucles. Cada llamada tiene un timeout de 60 segundos, respeta el límite del plan gratuito (15 peticiones por minuto) y se reintenta ante 429, 500, 503 y 504.
 - El modelo es `gemini-flash-latest`, un alias que Google puede mover a una versión más nueva. Si necesitas resultados reproducibles, fija un identificador de modelo concreto en `agente.py`.
 
 ## Evaluación
@@ -53,6 +67,7 @@ Limitaciones de la evaluación:
 
 - La comprobación es por coincidencia de texto, así que una respuesta correcta redactada de forma inesperada cuenta como fallo. En las preguntas sin respuesta posible busca frases como "no existe" o "no hay", así que conviene leer también `resultados.csv`.
 - El modelo no es determinista y las preguntas son sencillas, así que una nota alta no significa que el agente sea fiable con otras más difíciles.
+- La evaluación solo cubre el dataset de ejemplo, no tus propios CSV.
 - El plan gratuito tiene una cuota de peticiones. Si se agota, la ejecución termina con errores de API y sin resultado.
 - Aquí todavía no se publica ninguna cifra de acierto: el resumen se genera ejecutando el script con tu propia clave.
 
@@ -100,6 +115,7 @@ python agente.py ruta/al/archivo.csv    # conversación con tu propio CSV
 - Comparar modelos (por ejemplo uno más pequeño) con el mismo contraste pareado.
 - Añadir una herramienta SQL (SQLite) y guardarraíles que rechacen preguntas ambiguas o ajenas al tema.
 - Sustituir la coincidencia de texto de las preguntas sin respuesta posible por una comprobación más estricta.
+- Admitir archivos Excel y varios CSV a la vez.
 
 ## Tecnologías
 
