@@ -110,8 +110,8 @@ def calcular(columna: str, operacion: str, agrupar_por: str | None = None,
     try:
         if agrupar_por:
             res = datos.groupby(agrupar_por)[columna].agg(OPERACIONES[operacion])
-            return {"resultado": {str(k): round(float(v), 2) for k, v in res.items()}}
-        return {"resultado": round(float(datos[columna].agg(OPERACIONES[operacion])), 2)}
+            return {"resultado": {str(k): _r(v) for k, v in res.items()}}
+        return {"resultado": _r(datos[columna].agg(OPERACIONES[operacion]))}
     except Exception as e:
         return {"error": str(e)}
 
@@ -138,7 +138,7 @@ def calcular_por_mes(columna: str, operacion: str, columna_fecha: str | None = N
         return {"error": error}
     try:
         res = datos.groupby(datos[columna_fecha].dt.to_period("M"))[columna].agg(OPERACIONES[operacion])
-        return {"resultado": {str(k): round(float(v), 2) for k, v in res.items()}}
+        return {"resultado": {str(k): _r(v) for k, v in res.items()}}
     except Exception as e:
         return {"error": str(e)}
 
@@ -152,6 +152,12 @@ def ranking(columna: str, operacion: str, agrupar_por: str, n: int = 3, orden: s
         return {"error": f"Operación no válida. Usa una de: {list(OPERACIONES)}"}
     if orden not in ("mayor", "menor"):
         return {"error": "orden debe ser 'mayor' o 'menor'"}
+    try:
+        n = int(n)
+    except (TypeError, ValueError):
+        return {"error": "n debe ser un número entero"}
+    if n < 1:
+        return {"error": "n debe ser un entero mayor que 0"}
     error = _error_columnas(columna, agrupar_por)
     if error:
         return {"error": error}
@@ -161,7 +167,7 @@ def ranking(columna: str, operacion: str, agrupar_por: str, n: int = 3, orden: s
     try:
         res = datos.groupby(agrupar_por)[columna].agg(OPERACIONES[operacion])
         res = res.sort_values(ascending=(orden == "menor")).head(int(n))
-        return {"resultado": {str(k): round(float(v), 2) for k, v in res.items()}}
+        return {"resultado": {str(k): _r(v) for k, v in res.items()}}
     except Exception as e:
         return {"error": str(e)}
 
@@ -179,7 +185,7 @@ def porcentaje_del_total(columna: str, agrupar_por: str,
     try:
         res = datos.groupby(agrupar_por)[columna].sum()
         pct = (res / res.sum() * 100).round(1)
-        return {"porcentajes": {str(k): float(v) for k, v in pct.items()}}
+        return {"porcentajes": {str(k): (None if pd.isna(v) else float(v)) for k, v in pct.items()}}
     except Exception as e:
         return {"error": str(e)}
 
@@ -245,8 +251,10 @@ def resumen_estadistico(columna: str, agrupar_por: str | None = None,
         return {"error": str(e)}
 
 
-def correlacion(columna_a: str, columna_b: str, metodo: str = "pearson") -> dict:
-    """Calcula el coeficiente de correlación entre dos columnas numéricas (metodo: 'pearson' o 'spearman')."""
+def correlacion(columna_a: str, columna_b: str, metodo: str = "pearson",
+                filtro_columna: str | None = None, filtro_valor: str | None = None) -> dict:
+    """Calcula el coeficiente de correlación entre dos columnas numéricas (metodo: 'pearson' o 'spearman').
+    Admite el mismo filtro opcional que calcular."""
     if metodo not in ("pearson", "spearman"):
         return {"error": "metodo debe ser 'pearson' o 'spearman'"}
     error = _error_columnas(columna_a, columna_b)
@@ -254,11 +262,19 @@ def correlacion(columna_a: str, columna_b: str, metodo: str = "pearson") -> dict
         return {"error": error}
     if not (pd.api.types.is_numeric_dtype(df[columna_a]) and pd.api.types.is_numeric_dtype(df[columna_b])):
         return {"error": "Las dos columnas deben ser numéricas"}
+    datos, error = _filtrar(filtro_columna, filtro_valor)
+    if error:
+        return {"error": error}
     try:
-        return {"correlacion": _r(df[columna_a].corr(df[columna_b], method=metodo)),
-                "metodo": metodo, "n": int(df[[columna_a, columna_b]].dropna().shape[0])}
+        pares = datos[[columna_a, columna_b]].dropna()
+        if metodo == "spearman":
+            # Spearman es Pearson sobre los rangos. Así no hace falta scipy, que pandas
+            # exigiría para method="spearman" y que no está en requirements.txt.
+            pares = pares.rank()
+        return {"correlacion": _r(pares[columna_a].corr(pares[columna_b])),
+                "metodo": metodo, "n": int(pares.shape[0])}
     except Exception as e:
         return {"error": str(e)}
 
 
-cargar_csv()  # dataset por defecto; el agente puede cambiarlo con cargar_csv(ruta)
+cargar_csv()  # dataset por defecto; `python agente.py ruta.csv` carga otro al arrancar

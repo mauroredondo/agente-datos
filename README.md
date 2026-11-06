@@ -1,72 +1,119 @@
-# Agente de análisis de datos con Gemini
+# Data analysis agent with Gemini
 
-Agente en Python que responde preguntas en lenguaje natural sobre un CSV de ventas.
-El modelo (Google Gemini) no calcula nada: decide qué herramienta usar, y las cifras
-las calcula pandas. Así las respuestas son verificables.
+🇬🇧 English | 🇪🇸 [Español](README.es.md)
 
-## Qué hace
+A Python agent that answers natural-language questions about a CSV file. The model (Google Gemini) does not calculate anything: it decides which tool to use, and pandas computes the figures. That makes every number in an answer checkable.
 
-Ejemplos de preguntas:
+## What it does
 
-- "¿Qué ciudad tiene más ingresos?"
-- "Dame el top 3 de productos por ingresos."
-- "¿Qué porcentaje de los ingresos supone Calzado?"
-- "¿Cuál es la mediana y la desviación típica de los ingresos por venta?"
-- "¿Hay correlación entre unidades e ingresos?"
-- "Dibuja un gráfico de barras de ingresos por ciudad."
+Example questions (on the included sales dataset):
 
-Recuerda la conversación, así que se pueden hacer preguntas de seguimiento
-("¿y en Madrid?").
+- "Which city has the highest revenue?"
+- "Give me the top 3 products by revenue."
+- "What percentage of total revenue does the Calzado category represent?"
+- "What are the median and the standard deviation of revenue per sale?"
+- "Is there a correlation between units and revenue?"
+- "Draw a bar chart of revenue by city."
 
-## Cómo funciona
+The agent remembers the conversation, so follow-up questions work ("and in Madrid?"). It works with any CSV, not only the sample one: it detects the separator (`,` `;` tab), tries UTF-8 and Latin-1, accepts decimal commas and converts date columns.
+
+The questions and the answers are in Spanish. The tool descriptions and the code comments are in Spanish too.
+
+## How it works
 
 ```
-Pregunta -> Gemini decide herramienta(s) -> Python/pandas las ejecuta -> Gemini redacta la respuesta
+Question -> Gemini picks tool(s) -> Python/pandas runs them -> Gemini writes the answer
 ```
 
-Bucle de agente manual con *function calling* (sin automatismos del SDK):
+It is a hand-written agent loop with *function calling* (the SDK's automatic mode is turned off):
 
-- 8 herramientas: `describir_datos`, `calcular`, `calcular_por_mes`, `ranking`,
-  `porcentaje_del_total`, `resumen_estadistico`, `correlacion`, `grafico`.
-- Los docstrings de las funciones son las descripciones que lee el modelo.
-- Los errores de las herramientas se devuelven como datos, para que el modelo se corrija solo.
-- Límite de pasos, control de velocidad (plan gratuito) y reintentos ante 429/500/503.
+- **8 tools:** `describir_datos`, `calcular`, `calcular_por_mes`, `ranking`, `porcentaje_del_total`, `resumen_estadistico`, `correlacion`, `grafico`.
+- The docstrings of the functions are the descriptions the model reads.
+- Tool errors are returned to the model as data, so it can correct itself (wrong column, invalid operation, filter with no rows).
+- A step limit (6) stops runaway loops. Calls are paced for the free tier (15 requests per minute) and retried on 429, 500, 503 and 504.
+- The model is `gemini-flash-latest`, an alias that Google can move to a newer version. Set a fixed model ID in `agente.py` if you need reproducible results.
 
-## Evaluación
+## Evaluation
 
-`evaluacion.py` lanza 24 preguntas cuya respuesta correcta se calcula con pandas
-(*ground truth*) y comprueba si la respuesta del agente contiene el valor correcto.
+`evaluacion.py` asks 24 questions whose correct answer is computed with pandas (*ground truth*) and checks that the agent's reply contains that value. It also asks 5 questions that **cannot** be answered with the columns of the dataset ("What is the total profit?", "How many returns were there in Madrid?"). For these, the right behaviour is to say that the data is not there, and giving a figure counts as a hallucination. It also counts replies that mention a currency, since the dataset has no currency column.
 
-Limitaciones conocidas: la comprobación es por coincidencia de texto, el LLM no es
-determinista y las preguntas son sencillas. No se prueban preguntas sin respuesta
-posible.
+```bash
+python evaluacion.py                        # one run
+python evaluacion.py --repeticiones 5       # each question 5 times, with confidence intervals
+python evaluacion.py --completa             # also a minimal prompt, to compare both versions
+python evaluacion.py --sin-imposibles       # skip the unanswerable questions
+```
 
-## Instalación
+Each answer is saved to `resultados.csv` as it arrives (not uploaded to GitHub). At the end it writes `resumen_evaluacion.md` with the date, the model, the accuracy and two 95 % confidence intervals:
 
-Requiere Python 3.13 y una API key gratuita de [Google AI Studio](https://aistudio.google.com/).
+- **Wilson**, which treats every answer as independent.
+- **Bootstrap over questions**, which resamples the questions. With several repetitions it is the more honest one, because repeated answers to the same question are not independent.
+
+With `--completa`, the two prompts are compared with an exact sign test over the questions where their success rates differ. Questions that fail because of an API error (overload, timeout, quota) are reported separately and never counted as wrong.
+
+Known limits of the evaluation:
+
+- The check is text matching, so a correct answer worded in an unexpected way counts as wrong. For the unanswerable questions it looks for phrases such as "no existe" or "no hay", so `resultados.csv` should be read as well.
+- The model is not deterministic, and the questions are simple, so a high score does not mean the agent is reliable on harder ones.
+- The free tier has a request quota. If it runs out, the run ends with API errors and no result.
+- No accuracy figure is published here yet: the summary is generated by running the script with your own key.
+
+## Tests
+
+The tools and the agent loop have unit tests that need neither a key nor internet. The loop is tested with a fake Gemini that returns scripted answers.
+
+```bash
+python -m unittest discover -s tests -t .
+```
+
+The tests cover each tool against pandas and the error paths (wrong column, invalid operation, filter with no rows, `NaN` values, CSV files with `;` separators, decimal commas and Latin-1), the agent loop (tool calls, errors returned as data, step limit, memory, empty replies from the model) and the statistics used by the evaluation.
+
+## Installation
+
+Requires Python 3.13 and a free API key from [Google AI Studio](https://aistudio.google.com/).
 
 ```bash
 git clone https://github.com/mauroredondo/agente-datos.git
 cd agente-datos
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-echo "GEMINI_API_KEY=tu_clave" > .env     
-python generar_datos.py                    # crea ventas.csv (datos sintéticos)
-python agente.py                           # modo conversación
-python evaluacion.py                       # evaluación (~2-3 min)
+echo "GEMINI_API_KEY=your_key" > .env   # .env is ignored by git
+python generar_datos.py                 # creates ventas.csv (synthetic data)
+python agente.py                        # chat with the sample dataset
+python agente.py path/to/file.csv       # chat with your own CSV
 ```
 
-## Estructura
+`requirements-lock.txt` has the exact versions used.
 
-| Archivo | Función |
+## Structure
+
+| File | Purpose |
 |---|---|
-| `agente.py` | Bucle del agente y llamadas a Gemini |
-| `herramientas.py` | Herramientas de análisis con pandas |
-| `evaluacion.py` | Evaluación con respuestas de referencia |
-| `generar_datos.py` | Genera el dataset sintético |
+| `agente.py` | Agent loop and Gemini calls (pacing, retries, step limit) |
+| `herramientas.py` | The 8 pandas tools and the CSV loader |
+| `evaluacion.py` | Evaluation with ground-truth and unanswerable questions, repetitions and confidence intervals |
+| `generar_datos.py` | Generates the synthetic sales dataset (300 rows, fixed seed) |
+| `tests/` | Unit tests for the tools and for the agent loop |
+| `pruebas/hola.py` | A one-call connection check for the API key |
 
-## Próximos pasos
+## Next steps
 
-- Repetir la evaluación varias veces y dar intervalo de confianza.
-- Añadir preguntas sin respuesta posible para medir alucinaciones.
-- Permitir cargar cualquier CSV.
+- Run the evaluation with several repetitions and publish the figures with their intervals.
+- Compare models (for example a smaller one) with the same paired test.
+- Add a SQL tool (SQLite) and guardrails that refuse ambiguous or off-topic questions.
+- Replace the text matching of the unanswerable questions with a stricter check.
+
+## Technologies
+
+Python 3.13 · Google Gemini (function calling) · pandas · matplotlib · unittest
+
+## What I learned
+
+- Building an agent loop by hand: tool schemas from docstrings, executing the calls, returning errors as data and limiting the number of steps.
+- Keeping the model away from the arithmetic, so that the answers can be verified against pandas.
+- Evaluating an LLM system with ground-truth questions, and being clear about what the evaluation cannot show.
+- Testing the deterministic parts without the API, and the agent loop with a fake model.
+
+## Author
+
+**Mauro Redondo Beltrán** · BSc in Mathematics (University of Salamanca) · MSc in Artificial Intelligence (La Salle - URL)

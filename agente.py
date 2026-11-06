@@ -13,7 +13,7 @@ load_dotenv()
 client = genai.Client(api_key=os.environ["GEMINI_API_KEY"],
                       http_options=types.HttpOptions(timeout=60_000))  # ms: evita esperas infinitas
 
-MODEL = "gemini-flash-latest"
+MODEL = "gemini-flash-lite-latest"
 MAX_PASOS = 6  # límite para que el agente no se quede en bucle
 
 HERRAMIENTAS = {f.__name__: f for f in (describir_datos, calcular, calcular_por_mes, ranking,
@@ -67,25 +67,36 @@ def preguntar(pregunta: str, instrucciones: str = INSTRUCCIONES, historial: list
     """Responde una pregunta. Si se pasa `historial` (lista), se va ampliando y el agente recuerda
     los turnos anteriores; sin él, cada pregunta empieza de cero."""
     contents = historial if historial is not None else []
+    inicio = len(contents)  # para deshacer este turno si el modelo no responde
     contents.append(types.Content(role="user", parts=[types.Part(text=pregunta)]))
     config = crear_config(instrucciones)
     for paso in range(MAX_PASOS):
         resp = llamar_modelo(contents, config)
-        llamadas = resp.function_calls
 
-        contents.append(resp.candidates[0].content)  # lo que dijo o pidió el modelo
+        # Gemini puede devolver una respuesta sin contenido (por ejemplo, bloqueada por seguridad).
+        # Se descarta el turno entero para no dejar el historial con una pregunta sin respuesta.
+        candidato = resp.candidates[0] if resp.candidates else None
+        if candidato is None or candidato.content is None or not candidato.content.parts:
+            del contents[inicio:]
+            motivo = getattr(candidato, "finish_reason", None)
+            detalle = f" (motivo: {getattr(motivo, 'name', motivo)})" if motivo else ""
+            return f"El modelo no ha devuelto ninguna respuesta{detalle}. Prueba a reformular la pregunta."
+
+        llamadas = resp.function_calls
+        contents.append(candidato.content)  # lo que dijo o pidió el modelo
         if not llamadas:  # el modelo ya tiene respuesta final
             return resp.text or ""
 
         resultados = []
         for llamada in llamadas:
-            print(f"  -> herramienta: {llamada.name}({dict(llamada.args)})")
+            argumentos = dict(llamada.args or {})  # una herramienta sin argumentos puede venir con args=None
+            print(f"  -> herramienta: {llamada.name}({argumentos})")
             funcion = HERRAMIENTAS.get(llamada.name)
             if funcion is None:
                 resultado = {"error": f"La herramienta {llamada.name} no existe"}
             else:
                 try:
-                    resultado = funcion(**llamada.args)
+                    resultado = funcion(**argumentos)
                 except Exception as e:
                     resultado = {"error": f"Argumentos no válidos para {llamada.name}: {e}"}
             resultados.append(types.Part.from_function_response(name=llamada.name, response=resultado))
